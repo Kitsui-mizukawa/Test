@@ -1,137 +1,97 @@
 ```
 import bpy
 import bmesh
-from math import pi
 
-def create_accurate_can():
+def create_perfect_can():
     # 1. Bersihkan Scene
     bpy.ops.object.select_all(action='SELECT')
     bpy.ops.object.delete()
 
-    # Parameter Geometri (dalam unit Blender/Meter)
-    # Sesuaikan untuk proporsi yang berbeda
-    subdivisions_radial = 128 # Gunakan lebih banyak vertices untuk lengkungan mulus
-    can_radius_body = 0.5
-    can_height_body = 2.0  # Ini akan menjadi bagian lurus
-    
-    can_radius_neck = 0.41 # Radius leher ramping
-    can_height_neck = 0.25 # Tinggi transisi necking
-    can_height_lip = 0.06 # Tinggi bibir paling atas
-    
-    can_depth_dome = 0.12 # Kedalaman kubah bawah
-
-    # 2. Buat Silinder Dasar (Hanya Badan Lurus, tanpa tutup)
+    # 2. Buat Silinder Dasar DENGAN TUTUP (NGON) agar mudah dimodifikasi
     bpy.ops.mesh.primitive_cylinder_add(
-        vertices=subdivisions_radial, 
-        radius=can_radius_body, 
-        depth=can_height_body, 
-        location=(0, 0, can_height_body / 2),
-        end_fill_type='NOTHING' # Loop terbuka untuk manipulasi bmesh
+        vertices=64, 
+        radius=0.5, 
+        depth=2.0, 
+        location=(0, 0, 1.0),
+        end_fill_type='NGON'
     )
     can = bpy.context.object
-    can.name = "Kaleng_Aluminium_Akurat"
-    mesh = can.data
+    can.name = "Kaleng_Aluminium_Realistis"
 
-    # 3. Masuk ke Edit Mode untuk Geometri Kompleks
+    # 3. Pindah ke Edit Mode
     bpy.ops.object.mode_set(mode='EDIT')
-    bm = bmesh.from_edit_mesh(mesh)
-    bm.verts.ensure_lookup_table()
+    bm = bmesh.from_edit_mesh(can.data)
+    bm.faces.ensure_lookup_table()
 
-    # Temukan Loop Vertikal Atas dan Bawah
-    max_z = max(v.co.z for v in bm.verts)
-    min_z = min(v.co.z for v in bm.verts)
+    # Cari permukaan (face) paling atas dan paling bawah
+    top_face = max(bm.faces, key=lambda f: f.calc_center_bounds().z)
+    bottom_face = min(bm.faces, key=lambda f: f.calc_center_bounds().z)
+
+    # --- Modifikasi Bagian Atas (Necking & Tutup) ---
     
-    top_loop_verts = [v for v in bm.verts if v.co.z > max_z - 0.001]
-    bottom_loop_verts = [v for v in bm.verts if v.co.z < min_z + 0.001]
+    # Langkah 1: Penciutan Leher (Necking)
+    ret_neck = bmesh.ops.extrude_discrete_faces(bm, faces=[top_face])
+    top_face = ret_neck['faces'][0]
+    bmesh.ops.translate(bm, vec=(0, 0, 0.2), verts=top_face.verts)
+    bmesh.ops.scale(bm, vec=(0.82, 0.82, 1.0), verts=top_face.verts)
 
-    # --- Bagian Atas: Necking, Bibir, Tutup ---
-    # Langkah Penciutan Leher (2-step transition untuk kehalusan)
-    # Langkah 1 (Transisi pertama)
-    max_z = max(v.co.z for v in bm.verts)
-    top_loop_edges = set(e for v in bm.verts if v.co.z > max_z - 0.001 for e in v.link_edges if e.is_manifold and e.verts[0].co.z > max_z - 0.001 and e.verts[1].co.z > max_z - 0.001)
-    ret_neck1 = bmesh.ops.extrude_edge_collection(bm, edges=list(top_loop_edges))
-    bmesh.ops.translate(bm, vec=(0, 0, can_height_neck / 2.0), verts=ret_neck1['verts'])
-    bmesh.ops.scale(bm, vec=((can_radius_body + can_radius_neck) / (2.0 * can_radius_body), (can_radius_body + can_radius_neck) / (2.0 * can_radius_body), 1.0), verts=ret_neck1['verts'])
+    # Langkah 2: Bibir Kaleng Tegak (Lip)
+    ret_lip = bmesh.ops.extrude_discrete_faces(bm, faces=[top_face])
+    top_face = ret_lip['faces'][0]
+    bmesh.ops.translate(bm, vec=(0, 0, 0.05), verts=top_face.verts)
+
+    # Langkah 3: Ketebalan Bibir Kaleng
+    ret_inset_top = bmesh.ops.inset_region(bm, faces=[top_face], thickness=0.04)
+    top_face = ret_inset_top['faces'][0]
+
+    # Langkah 4: Cekungan Area Tutup
+    ret_cap = bmesh.ops.extrude_discrete_faces(bm, faces=[top_face])
+    top_face = ret_cap['faces'][0]
+    bmesh.ops.translate(bm, vec=(0, 0, -0.06), verts=top_face.verts)
+
+    # --- Modifikasi Bagian Bawah (Cekungan / Dome) ---
     
-    # Langkah 2 (Final necking)
-    max_z = max(v.co.z for v in bm.verts)
-    top_loop_edges = set(e for v in bm.verts if v.co.z > max_z - 0.001 for e in v.link_edges if e.is_manifold and e.verts[0].co.z > max_z - 0.001 and e.verts[1].co.z > max_z - 0.001)
-    ret_neck2 = bmesh.ops.extrude_edge_collection(bm, edges=list(top_loop_edges))
-    bmesh.ops.translate(bm, vec=(0, 0, can_height_neck / 2.0), verts=ret_neck2['verts'])
-    bmesh.ops.scale(bm, vec=(can_radius_neck / ((can_radius_body + can_radius_neck) / 2.0), can_radius_neck / ((can_radius_body + can_radius_neck) / 2.0), 1.0), verts=ret_neck2['verts'])
+    # Langkah 1: Bibir Penopang Bawah
+    ret_inset_bot = bmesh.ops.inset_region(bm, faces=[bottom_face], thickness=0.06)
+    bottom_face = ret_inset_bot['faces'][0]
 
-    # Bibir Kaleng (Lip)
-    max_z = max(v.co.z for v in bm.verts)
-    top_loop_edges = set(e for v in bm.verts if v.co.z > max_z - 0.001 for e in v.link_edges if e.is_manifold and e.verts[0].co.z > max_z - 0.001 and e.verts[1].co.z > max_z - 0.001)
-    ret_lip1 = bmesh.ops.extrude_edge_collection(bm, edges=list(top_loop_edges))
-    bmesh.ops.translate(bm, vec=(0, 0, can_height_lip), verts=ret_lip1['verts'])
+    # Langkah 2: Tarik ke Atas untuk Cekungan Khas Kaleng
+    ret_dome = bmesh.ops.extrude_discrete_faces(bm, faces=[bottom_face])
+    bottom_face = ret_dome['faces'][0]
+    bmesh.ops.translate(bm, vec=(0, 0, 0.15), verts=bottom_face.verts)
+    # Sedikit diperkecil agar membentuk kubah (dome) melengkung
+    bmesh.ops.scale(bm, vec=(0.8, 0.8, 1.0), verts=bottom_face.verts)
 
-    # Pelek Bibir (Menghadap Ke Dalam)
-    max_z = max(v.co.z for v in bm.verts)
-    top_loop_edges = set(e for v in bm.verts if v.co.z > max_z - 0.001 for e in v.link_edges if e.is_manifold and e.verts[0].co.z > max_z - 0.001 and e.verts[1].co.z > max_z - 0.001)
-    ret_lip_inner = bmesh.ops.extrude_edge_collection(bm, edges=list(top_loop_edges))
-    bmesh.ops.scale(bm, vec=(0.95, 0.95, 1.0), verts=ret_lip_inner['verts']) # Skala ke dalam
-
-    # Kedalaman Tutup
-    max_z = max(v.co.z for v in bm.verts)
-    top_loop_edges = set(e for v in bm.verts if v.co.z > max_z - 0.001 for e in v.link_edges if e.is_manifold and e.verts[0].co.z > max_z - 0.001 and e.verts[1].co.z > max_z - 0.001)
-    ret_cap_depth = bmesh.ops.extrude_edge_collection(bm, edges=list(top_loop_edges))
-    bmesh.ops.translate(bm, vec=(0, 0, -0.06), verts=ret_cap_depth['verts']) # Extrude ke bawah
-
-    # Isi Tutup
-    max_z = max(v.co.z for v in bm.verts)
-    cap_loop_verts = [v for v in bm.verts if v.co.z > max_z - 0.001]
-    bmesh.ops.contextual_create(bm, geom=cap_loop_verts)
-
-    # --- Bagian Bawah: Rim, Dome ---
-    # Rim Bawah (Skala Ke Dalam untuk ketebalan)
-    min_z = min(v.co.z for v in bm.verts)
-    bottom_loop_edges = set(e for v in bm.verts if v.co.z < min_z + 0.001 for e in v.link_edges if e.is_manifold and e.verts[0].co.z < min_z + 0.001 and e.verts[1].co.z < min_z + 0.001)
-    ret_rim_bot = bmesh.ops.extrude_edge_collection(bm, edges=list(bottom_loop_edges))
-    bmesh.ops.scale(bm, vec=(0.90, 0.90, 1.0), verts=ret_rim_bot['verts'])
-
-    # Dome (Extrude Ke Atas)
-    min_z = min(v.co.z for v in bm.verts)
-    dome_loop_edges = set(e for v in bm.verts if v.co.z < min_z + 0.001 for e in v.link_edges if e.is_manifold and e.verts[0].co.z < min_z + 0.001 and e.verts[1].co.z < min_z + 0.001)
-    ret_dome = bmesh.ops.extrude_edge_collection(bm, edges=list(dome_loop_edges))
-    bmesh.ops.translate(bm, vec=(0, 0, can_depth_dome), verts=ret_dome['verts'])
-
-    # Isi Dome
-    min_z = min(v.co.z for v in bm.verts)
-    dome_loop_verts = [v for v in bm.verts if v.co.z < min_z + 0.001]
-    bmesh.ops.contextual_create(bm, geom=dome_loop_verts)
-
-    # 4. Finalisasi Geometri
-    bmesh.update_edit_mesh(mesh)
+    # Perbarui mesh ke Blender
+    bmesh.update_edit_mesh(can.data)
     bpy.ops.object.mode_set(mode='OBJECT')
 
-    # 5. Penghalusan (Smooth)
+    # 4. Modifiers & Shading
+    # Terapkan Smooth Shading
     bpy.ops.object.shade_smooth()
-    
-    # Tambahkan Bevel Modifier di Object Mode (untuk menghaluskan bibir kaleng dengan lembut tanpa mengubah bentuk keseluruhan)
-    bevel_mod = can.modifiers.new(name="SoftBevel", type='BEVEL')
-    bevel_mod.limit_method = 'ANGLE'
-    bevel_mod.angle_limit = 0.523599 # ~30 derajat, hanya haluskan sudut tajam
-    bevel_mod.width = 0.003
-    bevel_mod.segments = 3
 
-    # 6. Material Aluminium Metalik
-    mat_name = "Material_Aluminium"
-    mat = bpy.data.materials.get(mat_name) or bpy.data.materials.new(name=mat_name)
+    # Tambahkan Bevel Modifier untuk mempertegas sudut bibir kaleng
+    bevel = can.modifiers.new(name="Bevel", type='BEVEL')
+    bevel.limit_method = 'ANGLE'
+    bevel.angle_limit = 0.52 # Berlaku untuk sudut di atas 30 derajat
+    bevel.width = 0.005
+    bevel.segments = 3
+    
+    # Tambahkan Subdivision Surface untuk kelengkungan sempurna (Super Mulus)
+    subsurf = can.modifiers.new(name="Subdivision", type='SUBSURF')
+    subsurf.levels = 2
+    subsurf.render_levels = 2
+
+    # 5. Material Besi / Aluminium
+    mat = bpy.data.materials.new(name="Aluminium_Polos")
     mat.use_nodes = True
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
-    
     if bsdf:
-        bsdf.inputs['Base Color'].default_value = (0.8, 0.8, 0.8, 1) # Perak lebih terang
+        bsdf.inputs['Base Color'].default_value = (0.8, 0.8, 0.85, 1) # Abu-abu keputihan
         bsdf.inputs['Metallic'].default_value = 1.0
-        bsdf.inputs['Roughness'].default_value = 0.22
-        bsdf.inputs['Specular'].default_value = 0.6
-    
-    if len(can.data.materials) == 0:
-        can.data.materials.append(mat)
-    else:
-        can.data.materials[0] = mat
+        bsdf.inputs['Roughness'].default_value = 0.25 # Tidak terlalu memantul, seperti matte
+    can.data.materials.append(mat)
 
-# Jalankan Fungsi
-create_accurate_can()
+# Eksekusi Script
+create_perfect_can()
 ```
