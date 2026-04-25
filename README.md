@@ -1,5 +1,4 @@
-# Test
-
+```
 import bpy
 import bmesh
 
@@ -73,3 +72,4 @@ def create_beverage_can():
 
 # Jalankan fungsi
 create_beverage_can()
+```
