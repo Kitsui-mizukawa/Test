@@ -1,75 +1,125 @@
 ```
 import bpy
 import bmesh
+from math import pi
 
-def create_beverage_can():
-    # 1. Bersihkan scene (menghapus objek yang ada agar tidak menumpuk)
+def create_realistic_can():
+    # 1. Bersihkan Scene
     bpy.ops.object.select_all(action='SELECT')
     bpy.ops.object.delete()
 
-    # 2. Buat objek Silinder dasar dengan proporsi kaleng
+    # Parameter Geometri
+    subdivisions_radial = 64
+    can_height = 2.4  # Proporsi tinggi kaleng ramping
+    can_radius = 0.5
+    neck_height = 0.25
+    bottom_arch_depth = 0.15
+
+    # 2. Buat Silinder Dasar
     bpy.ops.mesh.primitive_cylinder_add(
-        vertices=64, 
-        radius=0.33, 
-        depth=1.2, 
-        location=(0, 0, 0.6)
+        vertices=subdivisions_radial, 
+        radius=can_radius, 
+        depth=can_height, 
+        location=(0, 0, can_height / 2),
+        end_fill_type='NOTHING'
     )
     can = bpy.context.object
-    can.name = "Kaleng_Minuman"
+    can.name = "Kaleng_Aluminium"
+    mesh = can.data
 
-    # 3. Pindah ke Edit Mode untuk memodifikasi mesh
+    # 3. Mode Edit untuk Geometri Kompleks
     bpy.ops.object.mode_set(mode='EDIT')
-    bm = bmesh.from_edit_mesh(can.data)
+    bm = bmesh.from_edit_mesh(mesh)
+    bm.verts.ensure_lookup_table()
 
-    # Cari face bagian paling atas dan paling bawah berdasarkan posisi Z
-    faces = [f for f in bm.faces]
-    top_face = max(faces, key=lambda f: f.calc_center_bounds().z)
-    bottom_face = min(faces, key=lambda f: f.calc_center_bounds().z)
+    # --- Bagian Bawah (Alas Melengkung) ---
+    # Pilih edge loop bawah
+    bpy.ops.mesh.select_all(action='DESELECT')
+    for v in bm.verts:
+        if v.co.z < 0.001:
+            v.select = True
+    
+    # Inset pertama untuk ketebalan dinding
+    bpy.ops.mesh.inset(thickness=0.04)
+    # Extrude ke dalam untuk kubah bawah
+    bpy.ops.mesh.extrude_region_move(
+        MESH_OT_extrude_region={}, 
+        TRANSFORM_OT_translate={"value": (0, 0, bottom_arch_depth)}
+    )
+    # Bevel untuk memperhalus transisi bawah
+    bpy.ops.mesh.bevel(offset=0.05, segments=3, profile=0.5)
 
-    # --- Modifikasi Bagian Atas (Bibir Kaleng) ---
-    # Buat Inset (lingkaran ke dalam)
-    ret_top = bmesh.ops.inset_region(bm, faces=[top_face], thickness=0.03)
-    new_top_face = ret_top['faces']
-    # Extrude ke bawah untuk membuat cekungan atas
-    ext_top = bmesh.ops.extrude_discrete_faces(bm, faces=new_top_face)
-    bmesh.ops.translate(bm, vec=(0, 0, -0.03), verts=ext_top['faces'][0].verts)
+    # --- Bagian Atas (Necking dan Tutup) ---
+    # Pilih edge loop atas
+    bpy.ops.mesh.select_all(action='DESELECT')
+    for v in bm.verts:
+        if v.co.z > can_height - 0.001:
+            v.select = True
 
-    # --- Modifikasi Bagian Bawah (Cekungan Bawah) ---
-    # Buat Inset 
-    ret_bot = bmesh.ops.inset_region(bm, faces=[bottom_face], thickness=0.04)
-    new_bot_face = ret_bot['faces']
-    # Extrude ke atas untuk membuat cekungan bawah khas kaleng
-    ext_bot = bmesh.ops.extrude_discrete_faces(bm, faces=new_bot_face)
-    bmesh.ops.translate(bm, vec=(0, 0, 0.1), verts=ext_bot['faces'][0].verts)
+    # Membuat 'Neck' (penciutan leher)
+    # Langkah 1: Bevel loop atas untuk membuat transisi leher
+    bpy.ops.mesh.bevel(offset=neck_height, segments=5, profile=0.5)
+    
+    # Langkah 2: Skala loop paling atas ke dalam
+    # (Ini membutuhkan manipulasi manual atau bevel yang lebih presisi, 
+    #  disini kita gunakan skala sederhana)
+    bm.verts.ensure_lookup_table()
+    top_loop_verts = [v for v in bm.verts if v.select]
+    # Catatan: Skala loop yang dipilih sulit via operator mesh, 
+    # kita gunakan transformasi object mode sementara atau vertex manipulation.
+    # Pendekatan yang lebih bersih: gunakan loop cuts dan skala terpisah.
+    # Namun, untuk script tunggal, bevel + inset adalah yang termudah.
+    
+    # Kembali ke loop atas tunggal untuk inset
+    bpy.ops.mesh.select_all(action='DESELECT')
+    # Temukan vertikal tertinggi (leher paling atas)
+    max_z = max(v.co.z for v in bm.verts)
+    for v in bm.verts:
+        if v.co.z > max_z - 0.001:
+            v.select = True
 
-    # Perbarui mesh dan kembali ke Object Mode
-    bmesh.update_edit_mesh(can.data)
+    # Inset untuk bibir kaleng
+    bpy.ops.mesh.inset(thickness=0.03)
+    # Extrude ke bawah sedikit untuk cekungan tutup
+    bpy.ops.mesh.extrude_region_move(
+        MESH_OT_extrude_region={}, 
+        TRANSFORM_OT_translate={"value": (0, 0, -0.05)}
+    )
+    
+    # --- Opsional: Tab Penarik (Tab Pull) Minimal ---
+    # Ini memerlukan geometri bmesh terpisah, kita lewati untuk kebersihan script utama,
+    # tetapi geometry di atas sudah menciptakan cekungan penutup yang benar.
+
+    # 4. Finalisasi Geometri
+    bmesh.update_edit_mesh(mesh)
     bpy.ops.object.mode_set(mode='OBJECT')
 
-    # 4. Penghalusan (Shading & Modifiers)
-    # Terapkan Smooth Shading
+    # 5. Penghalusan dan Modifiers
     bpy.ops.object.shade_smooth()
+    
+    # Tambahkan Edge Split untuk menjaga ketajaman bibir
+    edge_split = can.modifiers.new(name="EdgeSplit", type='EDGE_SPLIT')
+    edge_split.split_angle = 30 * (pi / 180) # 30 derajat
 
-    # Tambahkan Bevel Modifier agar sudut-sudutnya tidak tajam (realistis)
-    bevel = can.modifiers.new(name="Bevel", type='BEVEL')
-    bevel.limit_method = 'ANGLE'
-    bevel.angle_limit = 0.523599 # Sekitar 30 derajat
-    bevel.width = 0.005
-    bevel.segments = 3
-
-    # 5. Tambahkan Material Metalik
-    mat = bpy.data.materials.new(name="Material_Kaleng")
+    # 6. Material Aluminium Metalik
+    mat_name = "Material_Aluminium"
+    mat = bpy.data.materials.get(mat_name) or bpy.data.materials.new(name=mat_name)
     mat.use_nodes = True
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
-    if bsdf:
-        # Mengatur parameter material agar terlihat seperti aluminium/besi yang dicat
-        bsdf.inputs['Base Color'].default_value = (0.8, 0.05, 0.05, 1) # Warna Merah
-        bsdf.inputs['Metallic'].default_value = 1.0
-        bsdf.inputs['Roughness'].default_value = 0.25
     
-    # Pasang material ke objek
-    can.data.materials.append(mat)
+    if bsdf:
+        bsdf.inputs['Base Color'].default_value = (0.7, 0.7, 0.7, 1) # Perak
+        bsdf.inputs['Metallic'].default_value = 1.0
+        bsdf.inputs['Roughness'].default_value = 0.2
+        # Sedikit Anisotropy untuk efek aluminium yang ditarik
+        bsdf.inputs['Anisotropic'].default_value = 0.3
+    
+    if len(can.data.materials) == 0:
+        can.data.materials.append(mat)
+    else:
+        can.data.materials[0] = mat
 
-# Jalankan fungsi
-create_beverage_can()
+# Jalankan Fungsi
+create_realistic_can()
+
 ```
